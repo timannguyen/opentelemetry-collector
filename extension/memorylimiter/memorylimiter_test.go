@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/internal/iruntime"
 	"go.uber.org/zap"
 
@@ -219,29 +218,4 @@ func TestRefuseDecision(t *testing.T) {
 			assert.Equal(t, test.shouldRefuse, shouldRefuse)
 		})
 	}
-}
-
-func testGetGetMemoryLimiterExtension(t *testing.T) {
-	exts := make(map[component.ID]component.Component)
-	t.Run("extension not found", func(t *testing.T) {
-		e, err := GetMemoryLimiterExtension(exts)
-		require.Error(t, err)
-		assert.Nil(t, e)
-	})
-
-	exts[component.NewID("ml")] = &memoryLimiter{
-		usageChecker: memUsageChecker{
-			memAllocLimit: 1024,
-		},
-		mustRefuse: &atomic.Bool{},
-		readMemStatsFn: func(ms *runtime.MemStats) {
-			ms.Alloc = 100
-		},
-		logger: zap.NewNop(),
-	}
-	t.Run("extension found", func(t *testing.T) {
-		ml, err := GetMemoryLimiterExtension(exts)
-		assert.NoError(t, err)
-		assert.NoError(t, ml.CheckMemory())
-	})
 }

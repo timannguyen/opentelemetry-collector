@@ -129,17 +129,6 @@ func getMemUsageChecker(cfg *Config, logger *zap.Logger) (*memUsageChecker, erro
 	return newPercentageMemUsageChecker(totalMemory, uint64(cfg.MemoryLimitPercentage), uint64(cfg.MemorySpikePercentage))
 }
 
-// GetMemoryLimiterExtension attempts to find a memory limiter extension in the extension list.
-// If a memory limiter extension is not found, an error is returned.
-func GetMemoryLimiterExtension(extensions map[component.ID]component.Component) (MemoryLimiter, error) {
-	for _, extension := range extensions {
-		if ext, ok := extension.(interface{ CheckMemory() error }); ok {
-			return ext.(MemoryLimiter), nil
-		}
-	}
-	return nil, fmt.Errorf("failed to resolve Memory Limiter")
-}
-
 func (ml *memoryLimiter) Start(_ context.Context, _ component.Host) error {
 	ml.startMonitoring()
 	return nil

@@ -6,6 +6,7 @@
 package memorylimiter // import "go.opentelemetry.io/collector/extension/memorylimiter"
 
 import (
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -33,6 +34,23 @@ type Config struct {
 	// MemorySpikePercentage is the maximum, in percents against the total memory,
 	// spike expected between the measurements of memory usage.
 	MemorySpikePercentage uint32 `mapstructure:"spike_limit_percentage"`
+}
+
+// MemoryLimitation defines memory limiter path for the receiver
+type MemoryLimitation struct {
+	// MemoryLimiterID specifies the name of the memory limiter extension
+	MemoryLimiterID component.ID `mapstructure:"memory_limiter"`
+}
+
+// GetMemoryLimiter attempts to find a memory limiter extension in the extension list.
+// If a memory limiter extension is not found, an error is returned.
+func (m *MemoryLimitation) GetMemoryLimiter(extensions map[component.ID]component.Component) (MemoryLimiter, error) {
+	if ext, found := extensions[m.MemoryLimiterID]; found {
+		if ml, ok := ext.(MemoryLimiter); ok {
+			return ml, nil
+		}
+	}
+	return nil, fmt.Errorf("failed to resolve Memory Limiter %q", m.MemoryLimiterID)
 }
 
 var _ component.Config = (*Config)(nil)

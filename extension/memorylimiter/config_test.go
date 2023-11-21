@@ -5,11 +5,14 @@ package memorylimiter
 
 import (
 	"path/filepath"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
@@ -55,4 +58,32 @@ func TestValidateConfig(t *testing.T) {
 	pCfg.MemoryLimitMiB = 0
 	pCfg.MemoryLimitPercentage = 0
 	assert.Error(t, pCfg.Validate(), errLimitOutOfRange)
+}
+
+func TestMemoryLimitation(t *testing.T) {
+	var mlc = &MemoryLimitation{
+		MemoryLimiterID: component.NewID("ml"),
+	}
+	exts := make(map[component.ID]component.Component)
+	t.Run("extension not found", func(t *testing.T) {
+		e, err := mlc.GetMemoryLimiter(exts)
+		require.Error(t, err)
+		assert.Nil(t, e)
+	})
+
+	exts[component.NewID("ml")] = &memoryLimiter{
+		usageChecker: memUsageChecker{
+			memAllocLimit: 1024,
+		},
+		mustRefuse: &atomic.Bool{},
+		readMemStatsFn: func(ms *runtime.MemStats) {
+			ms.Alloc = 100
+		},
+		logger: zap.NewNop(),
+	}
+	t.Run("extension found", func(t *testing.T) {
+		ml, err := mlc.GetMemoryLimiter(exts)
+		assert.NoError(t, err)
+		assert.NoError(t, ml.CheckMemory())
+	})
 }
