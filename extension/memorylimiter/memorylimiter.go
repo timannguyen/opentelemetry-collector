@@ -52,6 +52,14 @@ var (
 	getMemoryFn = iruntime.TotalMemory
 )
 
+// MemoryLimiter is an Extension control memory usage of OpenTelemetry Collector.
+// Common usage is to check memory usage during connection and can reject or accept the connection based on the
+// configured memoryLimiter settings
+type MemoryLimiter interface {
+	// CheckMemory check if memory usage is above soft limits and return error to refuse data if is above.
+	CheckMemory() error
+}
+
 type memoryLimiter struct {
 	usageChecker memUsageChecker
 
@@ -121,6 +129,17 @@ func getMemUsageChecker(cfg *Config, logger *zap.Logger) (*memUsageChecker, erro
 	return newPercentageMemUsageChecker(totalMemory, uint64(cfg.MemoryLimitPercentage), uint64(cfg.MemorySpikePercentage))
 }
 
+// GetMemoryLimiterExtension attempts to find a memory limiter extension in the extension list.
+// If a memory limiter extension is not found, an error is returned.
+func GetMemoryLimiterExtension(extensions map[component.ID]component.Component) (MemoryLimiter, error) {
+	for _, extension := range extensions {
+		if ext, ok := extension.(interface{ CheckMemory() error }); ok {
+			return ext.(MemoryLimiter), nil
+		}
+	}
+	return nil, fmt.Errorf("failed to resolve Memory Limiter")
+}
+
 func (ml *memoryLimiter) Start(_ context.Context, _ component.Host) error {
 	ml.startMonitoring()
 	return nil
@@ -139,6 +158,7 @@ func (ml *memoryLimiter) Shutdown(_ context.Context) error {
 	return nil
 }
 
+// CheckMemory check if memory usage is above soft limits and return error to refuse data if is above.
 func (ml *memoryLimiter) CheckMemory() error {
 	if ml.mustRefuse.Load() {
 		// TODO: actually to be 100% sure that this is "refused" and not "dropped"
