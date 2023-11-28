@@ -80,7 +80,7 @@ func TestNew(t *testing.T) {
 				return
 			}
 			assert.NoError(t, err)
-			got.Start(ctx, nil)
+			assert.NoError(t, got.Start(ctx, nil))
 			assert.NoError(t, got.Shutdown(ctx))
 		})
 	}
