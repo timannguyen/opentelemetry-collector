@@ -12,8 +12,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/collector/internal/iruntime"
 	"go.uber.org/zap"
+
+	"go.opentelemetry.io/collector/internal/iruntime"
 
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"

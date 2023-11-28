@@ -12,8 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.opentelemetry.io/collector/component"
 	"go.uber.org/zap"
+
+	"go.opentelemetry.io/collector/component"
 
 	"go.opentelemetry.io/collector/internal/iruntime"
 )
