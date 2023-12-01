@@ -18,12 +18,14 @@ import (
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
@@ -34,9 +36,13 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/config/internal"
 	"go.opentelemetry.io/collector/extension/auth"
+	"go.opentelemetry.io/collector/extension/memorylimiter"
 )
 
-var errMetadataNotFound = errors.New("no request metadata found")
+var (
+	errMetadataNotFound  = errors.New("no request metadata found")
+	errResourceExhausted = status.Error(codes.ResourceExhausted, "grpc: memory limit has reached")
+)
 
 // KeepaliveClientConfig exposes the keepalive.ClientParameters to be used by the exporter.
 // Refer to the original data-structure for the meaning of each parameter:
@@ -145,6 +151,8 @@ type GRPCServerSettings struct {
 
 	// Auth for this receiver
 	Auth *configauth.Authentication `mapstructure:"auth"`
+	// Memory limiter for this receiver
+	MemLimiter *memorylimiter.MemoryLimitation `mapstructure:"memory_limiter"`
 
 	// Include propagates the incoming connection's metadata to downstream consumers.
 	// Experimental: *NOTE* this option is subject to change or removal in the future.
@@ -359,6 +367,19 @@ func (gss *GRPCServerSettings) toServerOption(host component.Host, settings comp
 		})
 	}
 
+	if gss.MemLimiter != nil {
+		ml, err := gss.MemLimiter.GetMemoryLimiter(host.GetExtensions())
+		if err != nil {
+			return nil, err
+		}
+		uInterceptors = append(uInterceptors, func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+			return memLimiterUnaryServerInterceptor(ctx, req, info, handler, ml)
+		})
+		sInterceptors = append(sInterceptors, func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+			return memLimiterStreamServerInterceptor(srv, ss, info, handler, ml)
+		})
+	}
+
 	otelOpts := []otelgrpc.Option{
 		otelgrpc.WithTracerProvider(settings.TracerProvider),
 		otelgrpc.WithMeterProvider(settings.MeterProvider),
@@ -449,4 +470,18 @@ func authStreamServerInterceptor(srv any, stream grpc.ServerStream, _ *grpc.Stre
 	}
 
 	return handler(srv, wrapServerStream(ctx, stream))
+}
+
+func memLimiterUnaryServerInterceptor(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler, ml memorylimiter.MemoryLimiter) (any, error) {
+	if err := ml.CheckMemory(); err != nil {
+		return nil, errResourceExhausted
+	}
+	return handler(ctx, req)
+}
+
+func memLimiterStreamServerInterceptor(srv any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler, ml memorylimiter.MemoryLimiter) error {
+	if err := ml.CheckMemory(); err != nil {
+		return errResourceExhausted
+	}
+	return handler(srv, stream)
 }

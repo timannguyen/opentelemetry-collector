@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/config/internal"
 	"go.opentelemetry.io/collector/extension/auth"
+	"go.opentelemetry.io/collector/extension/memorylimiter"
 )
 
 const headerContentEncoding = "Content-Encoding"
@@ -236,6 +237,8 @@ type HTTPServerSettings struct {
 
 	// Auth for this receiver
 	Auth *configauth.Authentication `mapstructure:"auth"`
+	// Memory limiter for this receiver
+	MemLimiter *memorylimiter.MemoryLimitation `mapstructure:"memory_limiter"`
 
 	// MaxRequestBodySize sets the maximum request body size in bytes
 	MaxRequestBodySize int64 `mapstructure:"max_request_body_size"`
@@ -311,6 +314,14 @@ func (hss *HTTPServerSettings) ToServer(host component.Host, settings component.
 
 	if hss.MaxRequestBodySize > 0 {
 		handler = maxRequestBodySizeInterceptor(handler, hss.MaxRequestBodySize)
+	}
+
+	if hss.MemLimiter != nil {
+		limiter, err := hss.MemLimiter.GetMemoryLimiter(host.GetExtensions())
+		if err != nil {
+			return nil, err
+		}
+		handler = memLimiterInterceptor(handler, limiter)
 	}
 
 	if hss.Auth != nil {
@@ -410,6 +421,16 @@ func authInterceptor(next http.Handler, server auth.Server) http.Handler {
 func maxRequestBodySizeInterceptor(next http.Handler, maxRecvSize int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRecvSize)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func memLimiterInterceptor(next http.Handler, ml memorylimiter.MemoryLimiter) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := ml.CheckMemory(); err != nil {
+			http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
