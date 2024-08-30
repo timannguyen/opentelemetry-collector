@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -529,6 +531,56 @@ func TestPersistentQueueStartWithNonDispatched(t *testing.T) {
 	// Reload with extra capacity to make sure we re-enqueue in-progress items.
 	newPs := createTestPersistentQueueWithRequestsCapacity(t, ext, 6)
 	require.Equal(t, 6, newPs.Size())
+}
+
+func TestPersistentQueueStartWithNonDispatchedConcurrent(t *testing.T) {
+	req := newTracesRequest(5, 10)
+	cfg := filestorage.NewFactory().CreateDefaultConfig().(*filestorage.Config)
+	cfg.Directory = "/tmp/"
+	ext, err := filestorage.NewFactory().CreateExtension(context.Background(), extensiontest.NewNopSettings(), cfg)
+	require.NoError(t, err)
+	ps := NewPersistentQueue[tracesRequest](PersistentQueueSettings[tracesRequest]{
+		Sizer:            &ItemsSizer[tracesRequest]{},
+		Capacity:         100000,
+		DataType:         component.DataTypeTraces,
+		StorageID:        component.ID{},
+		Marshaler:        marshalTracesRequest,
+		Unmarshaler:      unmarshalTracesRequest,
+		ExporterSettings: exportertest.NewNopSettings(),
+	}).(*persistentQueue[tracesRequest])
+	require.NoError(t, ps.Start(context.Background(), &mockHost{ext: map[component.ID]component.Component{{}: ext}}))
+
+	proWg := sync.WaitGroup{}
+	go func(g *sync.WaitGroup) {
+		proWg.Add(1)
+		for j := 0; j < 100; j++ {
+			proWg.Add(1)
+			go func(g *sync.WaitGroup) {
+				// Put in items up to capacity
+				for i := 0; i < 100; i++ {
+					_ = ps.Offer(context.Background(), req)
+				}
+				g.Done()
+			}(g)
+		}
+		g.Done()
+	}(&proWg)
+	conWg := sync.WaitGroup{}
+	go func(g *sync.WaitGroup) {
+		conWg.Add(1)
+		for j := 0; j < 10; j++ {
+			conWg.Add(1)
+			go func(g *sync.WaitGroup) {
+				for i := 1000; i > 0; i-- {
+					require.True(t, ps.Consume(func(context.Context, tracesRequest) error { return nil }))
+				}
+				g.Done()
+			}(g)
+		}
+		g.Done()
+	}(&conWg)
+	proWg.Wait()
+	conWg.Wait()
 }
 
 func TestPersistentQueue_PutCloseReadClose(t *testing.T) {
