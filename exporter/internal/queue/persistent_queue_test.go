@@ -551,36 +551,37 @@ func TestPersistentQueueStartWithNonDispatchedConcurrent(t *testing.T) {
 	require.NoError(t, ps.Start(context.Background(), &mockHost{ext: map[component.ID]component.Component{{}: ext}}))
 
 	proWg := sync.WaitGroup{}
-	go func(g *sync.WaitGroup) {
+	go func(pg *sync.WaitGroup) {
+		defer pg.Done()
 		proWg.Add(1)
-		for j := 0; j < 100; j++ {
+		for j := 0; j < 10; j++ {
 			proWg.Add(1)
 			go func(g *sync.WaitGroup) {
+				defer g.Done()
 				// Put in items up to capacity
-				for i := 0; i < 100; i++ {
+				for i := 0; i < 1000; i++ {
 					_ = ps.Offer(context.Background(), req)
 				}
-				g.Done()
-			}(g)
+			}(pg)
 		}
-		g.Done()
 	}(&proWg)
 	conWg := sync.WaitGroup{}
-	go func(g *sync.WaitGroup) {
+	go func(pg *sync.WaitGroup) {
+		defer pg.Done()
 		conWg.Add(1)
 		for j := 0; j < 10; j++ {
 			conWg.Add(1)
 			go func(g *sync.WaitGroup) {
+				defer g.Done()
 				for i := 1000; i > 0; i-- {
 					require.True(t, ps.Consume(func(context.Context, tracesRequest) error { return nil }))
 				}
-				g.Done()
-			}(g)
+			}(pg)
 		}
-		g.Done()
 	}(&conWg)
-	proWg.Wait()
+	time.Sleep(time.Second)
 	conWg.Wait()
+	proWg.Wait()
 }
 
 func TestPersistentQueue_PutCloseReadClose(t *testing.T) {
