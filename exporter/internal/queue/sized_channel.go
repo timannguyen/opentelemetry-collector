@@ -3,7 +3,10 @@
 
 package queue // import "go.opentelemetry.io/collector/exporter/internal/queue"
 
-import "sync/atomic"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // sizedChannel is a channel wrapper for sized elements with a capacity set to a total size of all the elements.
 // The channel will accept elements until the total size of the elements reaches the capacity.
@@ -47,8 +50,10 @@ func newSizedChannel[T any](capacity int64, els []T, totalSize int64) *sizedChan
 func (vcq *sizedChannel[T]) push(el T, size int64, callback func() error) error {
 	if vcq.used.Add(size) > vcq.cap {
 		vcq.used.Add(-size)
+		fmt.Printf("full queuesize: %d\n", vcq.used)
 		return ErrQueueIsFull
 	}
+	fmt.Printf("produce queuesize: %d\n", vcq.used)
 	if callback != nil {
 		if err := callback(); err != nil {
 			vcq.used.Add(-size)
@@ -77,6 +82,7 @@ func (vcq *sizedChannel[T]) pop(callback func(T) (size int64)) (T, bool) {
 	if vcq.used.Add(-size) < 0 {
 		vcq.used.Store(0)
 	}
+	fmt.Printf("consume queuesize: %d\n", vcq.used)
 	return el, true
 }
 

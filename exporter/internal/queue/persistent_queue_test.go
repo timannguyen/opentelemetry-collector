@@ -541,7 +541,7 @@ func TestPersistentQueueStartWithNonDispatchedConcurrent(t *testing.T) {
 	require.NoError(t, err)
 	ps := NewPersistentQueue[tracesRequest](PersistentQueueSettings[tracesRequest]{
 		Sizer:            &ItemsSizer[tracesRequest]{},
-		Capacity:         100000,
+		Capacity:         1000,
 		DataType:         component.DataTypeTraces,
 		StorageID:        component.ID{},
 		Marshaler:        marshalTracesRequest,
@@ -554,13 +554,21 @@ func TestPersistentQueueStartWithNonDispatchedConcurrent(t *testing.T) {
 	go func(pg *sync.WaitGroup) {
 		defer pg.Done()
 		proWg.Add(1)
-		for j := 0; j < 10; j++ {
+		for j := 0; j < 20; j++ {
 			proWg.Add(1)
 			go func(g *sync.WaitGroup) {
 				defer g.Done()
 				// Put in items up to capacity
-				for i := 0; i < 1000; i++ {
-					_ = ps.Offer(context.Background(), req)
+				var subErr error
+				for i := 0; i < 100; i++ {
+					tries := 0
+					for subErr = ps.Offer(context.Background(), req); subErr != nil; {
+						tries++
+						if tries%100 == 0 {
+							fmt.Printf("retrying #%d\n", tries)
+						}
+						time.Sleep(10 * time.Microsecond)
+					}
 				}
 			}(pg)
 		}
@@ -573,7 +581,7 @@ func TestPersistentQueueStartWithNonDispatchedConcurrent(t *testing.T) {
 			conWg.Add(1)
 			go func(g *sync.WaitGroup) {
 				defer g.Done()
-				for i := 1000; i > 0; i-- {
+				for i := 200; i > 0; i-- {
 					require.True(t, ps.Consume(func(context.Context, tracesRequest) error { return nil }))
 				}
 			}(pg)
